@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <chrono>
+#include <zstd.h>
 #include "file_dumper.h"
 
 using namespace nccltrace;
@@ -32,21 +33,49 @@ struct LogEntry {
     }
 };
 
-// Helper function to read file content
+// Helper function to read zstd compressed file content
 std::string read_file_content(const std::string& filename) {
-    std::ifstream file(filename);
+    // Read compressed file
+    std::string compressed_filename = filename + ".zst";
+    std::ifstream file(compressed_filename, std::ios::binary);
     if (!file.is_open()) {
-        throw std::runtime_error("Failed to open file for reading: " + filename);
+        throw std::runtime_error("Failed to open file for reading: " + compressed_filename);
     }
     
-    std::stringstream buffer;
-    buffer << file.rdbuf();
-    return buffer.str();
+    // Read all compressed data
+    std::vector<char> compressed_data((std::istreambuf_iterator<char>(file)),
+                                      std::istreambuf_iterator<char>());
+    file.close();
+
+    if (compressed_data.empty()) {
+        return "";
+    }
+
+    // Get decompressed size
+    unsigned long long const decompressed_size = ZSTD_getFrameContentSize(
+        compressed_data.data(), compressed_data.size());
+
+    if (decompressed_size == ZSTD_CONTENTSIZE_ERROR ||
+        decompressed_size == ZSTD_CONTENTSIZE_UNKNOWN) {
+        throw std::runtime_error("Failed to determine decompressed size");
+    }
+
+    // Decompress data
+    std::vector<char> decompressed_data(decompressed_size);
+    size_t const result = ZSTD_decompress(
+        decompressed_data.data(), decompressed_data.size(),
+        compressed_data.data(), compressed_data.size());
+
+    if (ZSTD_isError(result)) {
+        throw std::runtime_error("Decompression error: " + std::string(ZSTD_getErrorName(result)));
+    }
+
+    return std::string(decompressed_data.begin(), decompressed_data.end());
 }
 
 // Helper function to clean up test files
 void cleanup_test_file(const std::string& filename) {
-    std::filesystem::remove(filename);
+    std::filesystem::remove(filename + ".zst");
 }
 
 TEST_CASE("FileDumper - Basic functionality", "[file_dumper]") {

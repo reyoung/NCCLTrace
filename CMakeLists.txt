@@ -12,9 +12,16 @@ endif()
 
 message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
-# Find zlib for gzip compression
-find_package(ZLIB REQUIRED)
-message(STATUS "Found ZLIB: ${ZLIB_LIBRARIES}")
+# Find zstd for compression
+find_path(ZSTD_INCLUDE_DIR zstd.h)
+find_library(ZSTD_LIBRARY NAMES zstd)
+
+if(NOT ZSTD_INCLUDE_DIR OR NOT ZSTD_LIBRARY)
+    message(FATAL_ERROR "zstd library not found. Please install libzstd-dev or zstd-devel")
+endif()
+
+message(STATUS "Found ZSTD include: ${ZSTD_INCLUDE_DIR}")
+message(STATUS "Found ZSTD library: ${ZSTD_LIBRARY}")
 
 add_subdirectory(3rd/catch2)
 add_subdirectory(3rd/json)
@@ -26,9 +33,10 @@ add_library(nccltrace SHARED nccltrace.cpp
 
 target_include_directories(nccltrace PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/3rd/json/single_include
+        ${ZSTD_INCLUDE_DIR}
 )
 
-target_link_libraries(nccltrace PRIVATE ZLIB::ZLIB)
+target_link_libraries(nccltrace PRIVATE ${ZSTD_LIBRARY})
 
 enable_testing()
 add_executable(nccltrace_lockfree_queue_test lock_free_queue_test.cpp)
@@ -37,7 +45,8 @@ add_test(nccltrace_lockfree_queue_test nccltrace_lockfree_queue_test)
 
 # FileDumper tests
 add_executable(nccltrace_file_dumper_test file_dumper_test.cpp)
-target_link_libraries(nccltrace_file_dumper_test Catch2WithMain ZLIB::ZLIB)
+target_include_directories(nccltrace_file_dumper_test PRIVATE ${ZSTD_INCLUDE_DIR})
+target_link_libraries(nccltrace_file_dumper_test Catch2WithMain ${ZSTD_LIBRARY})
 add_test(nccltrace_file_dumper_test nccltrace_file_dumper_test)
 
 add_executable(nccltrace_comm_desc_test comm_desc_test.cpp)

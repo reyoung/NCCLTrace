@@ -6,7 +6,7 @@ A high-performance NCCL profiler plugin that traces and logs NCCL communication 
 
 - **NCCL Profiler Plugin**: Implements the NCCL v4 profiler plugin interface
 - **Lock-Free Architecture**: Uses lock-free queues for minimal performance impact
-- **Compressed Output**: Automatically compresses trace logs using gzip
+- **High Compression Output**: Automatically compresses trace logs using zstd with high compression level (15)
 - **Comprehensive Event Tracking**: Captures various NCCL events including:
   - Collective operations (AllReduce, Broadcast, etc.)
   - Point-to-point operations (Send/Recv)
@@ -30,7 +30,7 @@ The project consists of several key components:
 
 - CMake 3.24 or higher
 - C++23 compatible compiler
-- ZLIB library
+- libzstd library
 - NCCL (for runtime usage)
 - PyTorch with NCCL backend (for testing)
 
@@ -74,7 +74,7 @@ export NCCL_TRACER_DUMP_FILE_NAME=/path/to/output_log
 ./your_nccl_application
 ```
 
-The plugin will create compressed trace files with `.gz` extension (e.g., `output_log.rank_0.gz`, `output_log.rank_1.gz`).
+The plugin will create zstd compressed trace files with `.zst` extension (e.g., `output_log.rank_0.zst`, `output_log.rank_1.zst`).
 
 ### Example: Tracing AllReduce Operations
 
@@ -149,10 +149,14 @@ Example event structure:
 To read the compressed logs:
 ```bash
 # View the raw JSON
-zcat output_log.rank_0.gz
+zstdcat output_log.rank_0.zst
 
 # Pretty print with jq
-zcat output_log.rank_0.gz | jq .
+zstdcat output_log.rank_0.zst | jq .
+
+# Or decompress first
+zstd -d output_log.rank_0.zst
+cat output_log.rank_0
 ```
 
 ## Testing
@@ -197,7 +201,7 @@ The activation mask is set in the `Tracer::on_comm_init()` method and can be cus
 
 - **Lock-Free Design**: The use of lock-free queues minimizes contention and overhead
 - **Asynchronous I/O**: Background threads handle file writing to avoid blocking the main application
-- **Compression**: Gzip compression reduces disk I/O and storage requirements
+- **High Compression**: Zstd compression with level 15 significantly reduces disk I/O and storage requirements while maintaining good performance
 - **Memory Pool**: Event handles are recycled using a free reference pool to reduce allocation overhead
 
 ## Project Structure

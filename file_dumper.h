@@ -11,7 +11,7 @@
 #include <functional>
 #include <stdexcept>
 #include <cstring>
-#include <zlib.h>
+#include <zstd.h>
 #include "lock_free_queue.h"
 
 namespace nccltrace {
@@ -30,18 +30,35 @@ public:
         const std::string& filename,
         std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(100)
     )
-        : filename_(filename + ".gz")  // Add .gz suffix
+        : filename_(filename + ".zst")  // Add .zst suffix
         , sleep_duration_(sleep_duration)
-        , gz_file_(nullptr)
+        , file_(nullptr)
+        , cctx_(nullptr)
+        , compression_buffer_size_(ZSTD_CStreamOutSize())
     {
-        // Open gzip file for writing
-        gz_file_ = gzopen(filename_.c_str(), "wb");
-        if (gz_file_ == nullptr) {
-            throw std::runtime_error("Failed to open gzip file: " + filename_);
+        // Open file for writing
+        file_ = std::fopen(filename_.c_str(), "wb");
+        if (file_ == nullptr) {
+            throw std::runtime_error("Failed to open file: " + filename_);
         }
 
-        // Set compression level (6 is default, 9 is max compression)
-        gzsetparams(gz_file_, 6, Z_DEFAULT_STRATEGY);
+        // Create zstd compression context
+        cctx_ = ZSTD_createCCtx();
+        if (cctx_ == nullptr) {
+            std::fclose(file_);
+            throw std::runtime_error("Failed to create ZSTD compression context");
+        }
+
+        // Set high compression level (19 is max for zstd, using 15 for good balance)
+        size_t const result = ZSTD_CCtx_setParameter(cctx_, ZSTD_c_compressionLevel, 15);
+        if (ZSTD_isError(result)) {
+            ZSTD_freeCCtx(cctx_);
+            std::fclose(file_);
+            throw std::runtime_error("Failed to set compression level: " + std::string(ZSTD_getErrorName(result)));
+        }
+
+        // Allocate compression output buffer
+        compression_buffer_.resize(compression_buffer_size_);
 
         // Start the dumper thread
         dumper_thread_ = std::jthread(
@@ -63,11 +80,15 @@ public:
         : filename_(std::move(other.filename_))
         , sleep_duration_(other.sleep_duration_)
         , queue_(std::move(other.queue_))
-        , gz_file_(other.gz_file_)
+        , file_(other.file_)
+        , cctx_(other.cctx_)
+        , compression_buffer_(std::move(other.compression_buffer_))
+        , compression_buffer_size_(other.compression_buffer_size_)
         , dumper_thread_(std::move(other.dumper_thread_))
         , stopped_(other.stopped_.load())
     {
-        other.gz_file_ = nullptr;
+        other.file_ = nullptr;
+        other.cctx_ = nullptr;
         other.stopped_ = true;
     }
     
@@ -78,11 +99,15 @@ public:
             filename_ = std::move(other.filename_);
             sleep_duration_ = other.sleep_duration_;
             queue_ = std::move(other.queue_);
-            gz_file_ = other.gz_file_;
+            file_ = other.file_;
+            cctx_ = other.cctx_;
+            compression_buffer_ = std::move(other.compression_buffer_);
+            compression_buffer_size_ = other.compression_buffer_size_;
             dumper_thread_ = std::move(other.dumper_thread_);
             stopped_ = other.stopped_.load();
 
-            other.gz_file_ = nullptr;
+            other.file_ = nullptr;
+            other.cctx_ = nullptr;
             other.stopped_ = true;
         }
         return *this;
@@ -105,15 +130,74 @@ public:
                 dumper_thread_.join();
             }
             
-            // Close the gzip file
-            if (gz_file_ != nullptr) {
-                gzclose(gz_file_);
-                gz_file_ = nullptr;
+            // Free zstd context and close file
+            if (cctx_ != nullptr) {
+                ZSTD_freeCCtx(cctx_);
+                cctx_ = nullptr;
+            }
+            if (file_ != nullptr) {
+                std::fclose(file_);
+                file_ = nullptr;
             }
         }
     }
 
 private:
+    // Helper function to write compressed data
+    void write_compressed(const void* data, size_t size) {
+        ZSTD_inBuffer input = { data, size, 0 };
+
+        while (input.pos < input.size) {
+            ZSTD_outBuffer output = { compression_buffer_.data(), compression_buffer_size_, 0 };
+
+            size_t const result = ZSTD_compressStream2(cctx_, &output, &input, ZSTD_e_continue);
+            if (ZSTD_isError(result)) {
+                throw std::runtime_error("Compression error: " + std::string(ZSTD_getErrorName(result)));
+            }
+
+            if (output.pos > 0) {
+                std::fwrite(compression_buffer_.data(), 1, output.pos, file_);
+            }
+        }
+    }
+
+    // Helper function to flush compressed data
+    void flush_compressed() {
+        ZSTD_outBuffer output = { compression_buffer_.data(), compression_buffer_size_, 0 };
+
+        size_t remaining = ZSTD_flushStream(cctx_, &output);
+        while (remaining > 0) {
+            if (output.pos > 0) {
+                std::fwrite(compression_buffer_.data(), 1, output.pos, file_);
+            }
+            output.pos = 0;
+            remaining = ZSTD_flushStream(cctx_, &output);
+        }
+
+        if (output.pos > 0) {
+            std::fwrite(compression_buffer_.data(), 1, output.pos, file_);
+        }
+        std::fflush(file_);
+    }
+
+    // Helper function to finish compression
+    void finish_compressed() {
+        ZSTD_outBuffer output = { compression_buffer_.data(), compression_buffer_size_, 0 };
+
+        size_t remaining = ZSTD_endStream(cctx_, &output);
+        while (remaining > 0) {
+            if (output.pos > 0) {
+                std::fwrite(compression_buffer_.data(), 1, output.pos, file_);
+            }
+            output.pos = 0;
+            remaining = ZSTD_endStream(cctx_, &output);
+        }
+
+        if (output.pos > 0) {
+            std::fwrite(compression_buffer_.data(), 1, output.pos, file_);
+        }
+    }
+
     // Background thread function
     void dumper_thread_func(std::stop_token stoken) {
         // Use a stringstream buffer for efficient serialization
@@ -130,12 +214,12 @@ private:
                 item.value().dump(buffer);
                 buffer << "\n";
 
-                // Write compressed data to gzip file
-                if (gz_file_ != nullptr) {
+                // Write compressed data
+                if (file_ != nullptr && cctx_ != nullptr) {
                     std::string data = buffer.str();
-                    gzwrite(gz_file_, data.c_str(), data.size());
+                    write_compressed(data.c_str(), data.size());
                     // Flush periodically for better error recovery
-                    gzflush(gz_file_, Z_SYNC_FLUSH);
+                    flush_compressed();
                 }
             } else {
                 // No data available, sleep for the specified duration
@@ -155,22 +239,25 @@ private:
             item.value().dump(buffer);
             buffer << "\n";
 
-            if (gz_file_ != nullptr) {
+            if (file_ != nullptr && cctx_ != nullptr) {
                 std::string data = buffer.str();
-                gzwrite(gz_file_, data.c_str(), data.size());
+                write_compressed(data.c_str(), data.size());
             }
         }
 
-        // Final flush
-        if (gz_file_ != nullptr) {
-            gzflush(gz_file_, Z_FINISH);
+        // Finish compression
+        if (file_ != nullptr && cctx_ != nullptr) {
+            finish_compressed();
         }
     }
     
     std::string filename_;
     std::chrono::milliseconds sleep_duration_;
     LockFreeQueue<T> queue_;
-    gzFile gz_file_;
+    std::FILE* file_;
+    ZSTD_CCtx* cctx_;
+    std::vector<char> compression_buffer_;
+    size_t compression_buffer_size_;
     std::jthread dumper_thread_;
     std::atomic<bool> stopped_{false};
 };
