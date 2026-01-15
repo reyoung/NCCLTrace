@@ -65,21 +65,21 @@ struct BaseEventHandle {
   void on_obj_free();
   void on_obj_required_again();
 
-  template <typename T>
-  void report(T desc);
+  template <typename T> void report(T desc);
 };
 
-std::optional<nlohmann::json> build_parent(const FreeRefPool<BaseEventHandle>::Item& ev_handle) {
+std::optional<nlohmann::json>
+build_parent(const FreeRefPool<BaseEventHandle>::Item &ev_handle) {
   if (ev_handle.parent_ == nullptr) {
     return std::nullopt;
   }
   nlohmann::json j;
-  auto p = reinterpret_cast<FreeRefPool<BaseEventHandle>::Item*>(ev_handle.parent_);
+  auto p =
+      reinterpret_cast<FreeRefPool<BaseEventHandle>::Item *>(ev_handle.parent_);
   j["id"] = p->rand_id_;
   j["parent"] = build_parent(*p);
   return j;
 }
-
 
 struct CommContext {
   std::weak_ptr<CommDesc> self_;
@@ -92,7 +92,7 @@ struct CommContext {
       : self_(desc), dumper_(dumper),
         pool_([this](BaseEventHandle *handle) { handle->reset(this); }) {}
 
-  template <typename T> void report(T desc, EventHandle* event_handle) {
+  template <typename T> void report(T desc, EventHandle *event_handle) {
     if (event_handle != nullptr) {
       desc.with_extra("id", event_handle->rand_id_);
       desc.with_extra("parent", build_parent(*event_handle));
@@ -111,11 +111,9 @@ struct CommContext {
   }
 };
 
-
 using EventHandle = CommContext::EventHandle;
-template <typename T>
-void BaseEventHandle::report(T desc) {
-  context_->report(std::move(desc), reinterpret_cast<EventHandle*>(this));
+template <typename T> void BaseEventHandle::report(T desc) {
+  context_->report(std::move(desc), reinterpret_cast<EventHandle *>(this));
 }
 
 inline void BaseEventHandle::on_event_stop() {
@@ -125,7 +123,7 @@ inline void BaseEventHandle::on_event_stop() {
         if constexpr (std::is_same_v<T, ProfileGroupContext>) {
           report(ProfileGroupStop{});
         } else if constexpr (std::is_same_v<T, ProfileCollContext>) {
-          report(ProfileCollStop{ .context_ = ev_ctx});
+          report(ProfileCollStop{.context_ = ev_ctx});
         } else if constexpr (std::is_same_v<T, ProfileP2pContext>) {
           report(ProfileP2pStop{.context_ = ev_ctx});
         } else if constexpr (std::is_same_v<T, ProfileProxyOpContext>) {
@@ -148,12 +146,12 @@ inline void BaseEventHandle::on_profile_group_start(void *parent, int rank) {
 
 inline void BaseEventHandle::on_coll_start(ProfileCollContext ctx) {
   event_context_ = ctx;
-  report(ProfileCollStart{ .context_ = ctx});
+  report(ProfileCollStart{.context_ = ctx});
 }
 
 inline void BaseEventHandle::on_p2p_start(ProfileP2pContext ctx) {
   event_context_ = ctx;
-  report(ProfileP2pStart{ .context_ = ctx});
+  report(ProfileP2pStart{.context_ = ctx});
 }
 
 inline void BaseEventHandle::on_kernel_ch_start(ProfileKernelChContext ctx) {
@@ -327,53 +325,67 @@ typedef ncclProfilerEventState_t ncclProfilerEventState_v4_t;
  */
 inline std::string_view get_e_state_name(ncclProfilerEventState_v4_t state) {
   // Static storage for state name strings
-  static constexpr const char* STATE_KERNEL_CH_STOP = "ncclProfilerKernelChStop";
-  static constexpr const char* STATE_PROXY_OP_IN_PROGRESS = "ncclProfilerProxyOpInProgress_v4";
-  static constexpr const char* STATE_PROXY_STEP_SEND_GPU_WAIT = "ncclProfilerProxyStepSendGPUWait";
-  static constexpr const char* STATE_PROXY_STEP_SEND_PEER_WAIT = "ncclProfilerProxyStepSendPeerWait_v4";
-  static constexpr const char* STATE_PROXY_STEP_SEND_WAIT = "ncclProfilerProxyStepSendWait";
-  static constexpr const char* STATE_PROXY_STEP_RECV_WAIT = "ncclProfilerProxyStepRecvWait";
-  static constexpr const char* STATE_PROXY_STEP_RECV_FLUSH_WAIT = "ncclProfilerProxyStepRecvFlushWait";
-  static constexpr const char* STATE_PROXY_STEP_RECV_GPU_WAIT = "ncclProfilerProxyStepRecvGPUWait";
-  static constexpr const char* STATE_PROXY_CTRL_IDLE = "ncclProfilerProxyCtrlIdle";
-  static constexpr const char* STATE_PROXY_CTRL_ACTIVE = "ncclProfilerProxyCtrlActive";
-  static constexpr const char* STATE_PROXY_CTRL_SLEEP = "ncclProfilerProxyCtrlSleep";
-  static constexpr const char* STATE_PROXY_CTRL_WAKEUP = "ncclProfilerProxyCtrlWakeup";
-  static constexpr const char* STATE_PROXY_CTRL_APPEND = "ncclProfilerProxyCtrlAppend";
-  static constexpr const char* STATE_PROXY_CTRL_APPEND_END = "ncclProfilerProxyCtrlAppendEnd";
-  static constexpr const char* STATE_UNKNOWN = "UnknownState";
+  static constexpr const char *STATE_KERNEL_CH_STOP =
+      "ncclProfilerKernelChStop";
+  static constexpr const char *STATE_PROXY_OP_IN_PROGRESS =
+      "ncclProfilerProxyOpInProgress_v4";
+  static constexpr const char *STATE_PROXY_STEP_SEND_GPU_WAIT =
+      "ncclProfilerProxyStepSendGPUWait";
+  static constexpr const char *STATE_PROXY_STEP_SEND_PEER_WAIT =
+      "ncclProfilerProxyStepSendPeerWait_v4";
+  static constexpr const char *STATE_PROXY_STEP_SEND_WAIT =
+      "ncclProfilerProxyStepSendWait";
+  static constexpr const char *STATE_PROXY_STEP_RECV_WAIT =
+      "ncclProfilerProxyStepRecvWait";
+  static constexpr const char *STATE_PROXY_STEP_RECV_FLUSH_WAIT =
+      "ncclProfilerProxyStepRecvFlushWait";
+  static constexpr const char *STATE_PROXY_STEP_RECV_GPU_WAIT =
+      "ncclProfilerProxyStepRecvGPUWait";
+  static constexpr const char *STATE_PROXY_CTRL_IDLE =
+      "ncclProfilerProxyCtrlIdle";
+  static constexpr const char *STATE_PROXY_CTRL_ACTIVE =
+      "ncclProfilerProxyCtrlActive";
+  static constexpr const char *STATE_PROXY_CTRL_SLEEP =
+      "ncclProfilerProxyCtrlSleep";
+  static constexpr const char *STATE_PROXY_CTRL_WAKEUP =
+      "ncclProfilerProxyCtrlWakeup";
+  static constexpr const char *STATE_PROXY_CTRL_APPEND =
+      "ncclProfilerProxyCtrlAppend";
+  static constexpr const char *STATE_PROXY_CTRL_APPEND_END =
+      "ncclProfilerProxyCtrlAppendEnd";
+  static constexpr const char *STATE_UNKNOWN = "UnknownState";
 
   switch (state) {
-    case ncclProfilerKernelChStop:
-      return STATE_KERNEL_CH_STOP;
-    case ncclProfilerProxyOpInProgress_v4:
-      return STATE_PROXY_OP_IN_PROGRESS;
-    case ncclProfilerProxyStepSendGPUWait:
-      return STATE_PROXY_STEP_SEND_GPU_WAIT;
-    case ncclProfilerProxyStepSendPeerWait_v4:
-      return STATE_PROXY_STEP_SEND_PEER_WAIT;
-    case ncclProfilerProxyStepSendWait:
-      return STATE_PROXY_STEP_SEND_WAIT;
-    case ncclProfilerProxyStepRecvWait:
-      return STATE_PROXY_STEP_RECV_WAIT;
-    case ncclProfilerProxyStepRecvFlushWait:
-      return STATE_PROXY_STEP_RECV_FLUSH_WAIT;
-    case ncclProfilerProxyStepRecvGPUWait:
-      return STATE_PROXY_STEP_RECV_GPU_WAIT;
-    case ncclProfilerProxyCtrlIdle:
-      return STATE_PROXY_CTRL_IDLE;
-    case ncclProfilerProxyCtrlActive:
-      return STATE_PROXY_CTRL_ACTIVE;
-    case ncclProfilerProxyCtrlSleep:
-      return STATE_PROXY_CTRL_SLEEP;
-    case ncclProfilerProxyCtrlWakeup:
-      return STATE_PROXY_CTRL_WAKEUP;
-    case ncclProfilerProxyCtrlAppend:
-      return STATE_PROXY_CTRL_APPEND;
-    case ncclProfilerProxyCtrlAppendEnd:
-      return STATE_PROXY_CTRL_APPEND_END;
-    default:
-      return STATE_UNKNOWN;
+  case ncclProfilerKernelChStop:
+    return STATE_KERNEL_CH_STOP;
+  case ncclProfilerProxyOpInProgress_v4:
+    return STATE_PROXY_OP_IN_PROGRESS;
+  case ncclProfilerProxyStepSendGPUWait:
+    return STATE_PROXY_STEP_SEND_GPU_WAIT;
+  case ncclProfilerProxyStepSendPeerWait_v4:
+    return STATE_PROXY_STEP_SEND_PEER_WAIT;
+  case ncclProfilerProxyStepSendWait:
+    return STATE_PROXY_STEP_SEND_WAIT;
+  case ncclProfilerProxyStepRecvWait:
+    return STATE_PROXY_STEP_RECV_WAIT;
+  case ncclProfilerProxyStepRecvFlushWait:
+    return STATE_PROXY_STEP_RECV_FLUSH_WAIT;
+  case ncclProfilerProxyStepRecvGPUWait:
+    return STATE_PROXY_STEP_RECV_GPU_WAIT;
+  case ncclProfilerProxyCtrlIdle:
+    return STATE_PROXY_CTRL_IDLE;
+  case ncclProfilerProxyCtrlActive:
+    return STATE_PROXY_CTRL_ACTIVE;
+  case ncclProfilerProxyCtrlSleep:
+    return STATE_PROXY_CTRL_SLEEP;
+  case ncclProfilerProxyCtrlWakeup:
+    return STATE_PROXY_CTRL_WAKEUP;
+  case ncclProfilerProxyCtrlAppend:
+    return STATE_PROXY_CTRL_APPEND;
+  case ncclProfilerProxyCtrlAppendEnd:
+    return STATE_PROXY_CTRL_APPEND_END;
+  default:
+    return STATE_UNKNOWN;
   }
 }
 
@@ -432,8 +444,7 @@ public:
   static void on_event_start_v4(void *context, void **eHandle,
                                 ncclProfilerEventDescr_v4_t *eDescr) {
     auto &sh_ctx = *static_cast<std::shared_ptr<CommContext> *>(context);
-    auto hdl = sh_ctx->pool_.create(
-      sh_ctx->self_.lock());
+    auto hdl = sh_ctx->pool_.create(sh_ctx->self_.lock());
     hdl->set_parent(eDescr->parentObj);
     *eHandle = hdl;
 
@@ -512,9 +523,10 @@ public:
             .context_ = ctx,
             .state_name_ = state_name,
         });
-        CTX_LOG_TRACE(*hdl->context_, 0,
-                     "proxy op state: rank=%d, channel_id=%u, peer=%d, state=%s",
-                     ctx.rank_, ctx.channel_id_, ctx.peer_, state_name.data());
+        CTX_LOG_TRACE(
+            *hdl->context_, 0,
+            "proxy op state: rank=%d, channel_id=%u, peer=%d, state=%s",
+            ctx.rank_, ctx.channel_id_, ctx.peer_, state_name.data());
       }
     } else if (eState == ncclProfilerProxyStepSendGPUWait ||
                eState == ncclProfilerProxyStepSendPeerWait_v4 ||
@@ -523,7 +535,8 @@ public:
                eState == ncclProfilerProxyStepRecvFlushWait ||
                eState == ncclProfilerProxyStepRecvGPUWait) {
       // Handle ProxyStep state record events
-      if (std::holds_alternative<ProfileProxyStepContext>(hdl->event_context_)) {
+      if (std::holds_alternative<ProfileProxyStepContext>(
+              hdl->event_context_)) {
         auto &ctx = std::get<ProfileProxyStepContext>(hdl->event_context_);
         size_t trans_size = eStateArgs ? eStateArgs->proxyStep.transSize : 0;
         std::string_view state_name = get_e_state_name(eState);
@@ -533,8 +546,8 @@ public:
             .trans_size_ = trans_size,
         });
         CTX_LOG_TRACE(*hdl->context_, 0,
-                     "proxy step state: step=%d, state=%s, trans_size=%zu",
-                     ctx.step_, state_name.data(), trans_size);
+                      "proxy step state: step=%d, state=%s, trans_size=%zu",
+                      ctx.step_, state_name.data(), trans_size);
       }
     } else if (eState == ncclProfilerProxyCtrlIdle ||
                eState == ncclProfilerProxyCtrlActive ||
@@ -543,9 +556,11 @@ public:
                eState == ncclProfilerProxyCtrlAppend ||
                eState == ncclProfilerProxyCtrlAppendEnd) {
       // Handle ProxyCtrl state record events
-      if (std::holds_alternative<ProfileProxyCtrlContext>(hdl->event_context_)) {
+      if (std::holds_alternative<ProfileProxyCtrlContext>(
+              hdl->event_context_)) {
         auto &ctx = std::get<ProfileProxyCtrlContext>(hdl->event_context_);
-        int appended_ops = eStateArgs ? eStateArgs->proxyCtrl.appendedProxyOps : 0;
+        int appended_ops =
+            eStateArgs ? eStateArgs->proxyCtrl.appendedProxyOps : 0;
         std::string_view state_name = get_e_state_name(eState);
         hdl->report(ProfileProxyCtrlStateRecord{
             .context_ = ctx,
@@ -553,11 +568,12 @@ public:
             .appended_proxy_ops_ = appended_ops,
         });
         CTX_LOG_TRACE(*hdl->context_, 0,
-                     "proxy ctrl state: rank=%d, state=%s, appended_ops=%d",
-                     ctx.rank_, state_name.data(), appended_ops);
+                      "proxy ctrl state: rank=%d, state=%s, appended_ops=%d",
+                      ctx.rank_, state_name.data(), appended_ops);
       }
     } else {
-      CTX_LOG_INFO(*hdl->context_, 0, "unhandled event state recorded state=%d", eState);
+      CTX_LOG_INFO(*hdl->context_, 0, "unhandled event state recorded state=%d",
+                   eState);
     }
   }
 
@@ -630,7 +646,8 @@ private:
   static ProfileProxyStepContext
   asProfileProxyStepContextV4(ncclProfilerEventDescr_v4_t *desc) {
     if (desc->type != ncclProfileProxyStep) {
-      throw std::runtime_error("Invalid event type for ProfileProxyStepContext");
+      throw std::runtime_error(
+          "Invalid event type for ProfileProxyStepContext");
     }
     return ProfileProxyStepContext{
         .rank_ = desc->rank,
@@ -641,7 +658,8 @@ private:
   static ProfileProxyCtrlContext
   asProfileProxyCtrlContextV4(ncclProfilerEventDescr_v4_t *desc) {
     if (desc->type != ncclProfileProxyCtrl) {
-      throw std::runtime_error("Invalid event type for ProfileProxyCtrlContext");
+      throw std::runtime_error(
+          "Invalid event type for ProfileProxyCtrlContext");
     }
     return ProfileProxyCtrlContext{
         .rank_ = desc->rank,
@@ -668,7 +686,8 @@ private:
 
       auto mask = std::getenv("NCCL_TRACER_ACTIVATE_MASK");
       if (mask == nullptr) {
-        activate_mask_ = ncclProfileP2p | ncclProfileColl | ncclProfileProxyStep;
+        activate_mask_ =
+            ncclProfileP2p | ncclProfileColl | ncclProfileProxyStep;
       } else {
         activate_mask_ = atoi(mask);
       }

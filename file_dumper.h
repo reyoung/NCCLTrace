@@ -14,7 +14,6 @@
 #include <stdexcept>
 #include <stop_token>
 #include <thread>
-#include <zstd.h>
 
 namespace nccltrace {
 
@@ -30,34 +29,12 @@ public:
   explicit FileDumper(
       const std::string &filename,
       std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(100))
-      : filename_(filename + ".zst") // Add .zst suffix
-        ,
-        sleep_duration_(sleep_duration), file_(nullptr), cctx_(nullptr),
-        compression_buffer_size_(ZSTD_CStreamOutSize()) {
+      : filename_(filename), sleep_duration_(sleep_duration) {
     // Open file for writing
-    file_ = std::fopen(filename_.c_str(), "wb");
-    if (file_ == nullptr) {
+    file_.open(filename_, std::ios::out);
+    if (!file_.is_open()) {
       throw std::runtime_error("Failed to open file: " + filename_);
     }
-
-    // Create zstd compression context
-    cctx_ = ZSTD_createCCtx();
-    if (cctx_ == nullptr) {
-      std::fclose(file_);
-      throw std::runtime_error("Failed to create ZSTD compression context");
-    }
-
-    // Set high compression level (19 is max for zstd, using 15 for good
-    // balance)
-    size_t result = ZSTD_CCtx_setParameter(cctx_, ZSTD_c_compressionLevel, 10);
-    if (ZSTD_isError(result)) {
-      ZSTD_freeCCtx(cctx_);
-      std::fclose(file_);
-      throw std::runtime_error("Failed to set compression level: " +
-                               std::string(ZSTD_getErrorName(result)));
-    }
-    // Allocate compression output buffer
-    compression_buffer_.resize(compression_buffer_size_);
 
     // Start the dumper thread
     dumper_thread_ =
@@ -75,13 +52,9 @@ public:
   FileDumper(FileDumper &&other) noexcept
       : filename_(std::move(other.filename_)),
         sleep_duration_(other.sleep_duration_), queue_(std::move(other.queue_)),
-        file_(other.file_), cctx_(other.cctx_),
-        compression_buffer_(std::move(other.compression_buffer_)),
-        compression_buffer_size_(other.compression_buffer_size_),
+        file_(std::move(other.file_)),
         dumper_thread_(std::move(other.dumper_thread_)),
         stopped_(other.stopped_.load()) {
-    other.file_ = nullptr;
-    other.cctx_ = nullptr;
     other.stopped_ = true;
   }
 
@@ -92,15 +65,10 @@ public:
       filename_ = std::move(other.filename_);
       sleep_duration_ = other.sleep_duration_;
       queue_ = std::move(other.queue_);
-      file_ = other.file_;
-      cctx_ = other.cctx_;
-      compression_buffer_ = std::move(other.compression_buffer_);
-      compression_buffer_size_ = other.compression_buffer_size_;
+      file_ = std::move(other.file_);
       dumper_thread_ = std::move(other.dumper_thread_);
       stopped_ = other.stopped_.load();
 
-      other.file_ = nullptr;
-      other.cctx_ = nullptr;
       other.stopped_ = true;
     }
     return *this;
@@ -123,124 +91,29 @@ public:
         dumper_thread_.join();
       }
 
-      // Free zstd context and close file
-      if (cctx_ != nullptr) {
-        ZSTD_freeCCtx(cctx_);
-        cctx_ = nullptr;
-      }
-      if (file_ != nullptr) {
-        std::fclose(file_);
-        file_ = nullptr;
+      // Close file
+      if (file_.is_open()) {
+        file_.close();
       }
     }
   }
 
 private:
-  // Helper function to write compressed data
-  void write_compressed(const void *data, size_t size) {
-    ZSTD_inBuffer input = {data, size, 0};
-
-    while (input.pos < input.size) {
-      ZSTD_outBuffer output = {compression_buffer_.data(),
-                               compression_buffer_size_, 0};
-
-      size_t const result =
-          ZSTD_compressStream2(cctx_, &output, &input, ZSTD_e_continue);
-      if (ZSTD_isError(result)) {
-        throw std::runtime_error("Compression error: " +
-                                 std::string(ZSTD_getErrorName(result)));
-      }
-
-      if (output.pos > 0) {
-        std::fwrite(compression_buffer_.data(), 1, output.pos, file_);
-      }
-    }
-  }
-
-  // Helper function to flush compressed data
-  void flush_compressed() {
-    ZSTD_outBuffer output = {compression_buffer_.data(),
-                             compression_buffer_size_, 0};
-
-    size_t remaining = ZSTD_flushStream(cctx_, &output);
-    while (remaining > 0) {
-      if (output.pos > 0) {
-        std::fwrite(compression_buffer_.data(), 1, output.pos, file_);
-      }
-      output.pos = 0;
-      remaining = ZSTD_flushStream(cctx_, &output);
-    }
-
-    if (output.pos > 0) {
-      std::fwrite(compression_buffer_.data(), 1, output.pos, file_);
-    }
-    std::fflush(file_);
-  }
-
-  // Helper function to finish compression
-  void finish_compressed() {
-    ZSTD_outBuffer output = {compression_buffer_.data(),
-                             compression_buffer_size_, 0};
-
-    size_t remaining = ZSTD_endStream(cctx_, &output);
-    while (remaining > 0) {
-      if (output.pos > 0) {
-        std::fwrite(compression_buffer_.data(), 1, output.pos, file_);
-      }
-      output.pos = 0;
-      remaining = ZSTD_endStream(cctx_, &output);
-    }
-
-    if (output.pos > 0) {
-      std::fwrite(compression_buffer_.data(), 1, output.pos, file_);
-    }
-  }
-
   // Background thread function
   void dumper_thread_func(std::stop_token stoken) {
-    // Use a stringstream buffer for efficient serialization
-    std::ostringstream buffer;
-    bool need_flash = false;
-    constexpr int lines_to_dump = 1024;
-    int buffered_lines = 0;
-    int printed = 0;
-    auto dump = [&] {
-      std::string_view data = buffer.view();
-      write_compressed(data.data(), data.size());
-      need_flash = true;
-      buffered_lines = 0;
-      // Dump the item to the string buffer
-      buffer.clear();
-    };
-
+    size_t max_size = 0;
     while (!stoken.stop_requested()) {
       // Try to pop an item from the queue
       auto item = queue_.try_pop();
-      auto qsize = queue_.size();
-      if (qsize > 1 << (10 + printed)) {
-        std::cerr << "queue size too large " << queue_.size() << std::endl;
-        printed++;
-      }
+      max_size = std::max(max_size, queue_.size());
 
       if (item.has_value()) {
-        item.value().dump(buffer);
-        buffer << "\n";
-        buffered_lines += 1;
-
-        // Write compressed data
-        if (file_ != nullptr && cctx_ != nullptr &&
-            buffered_lines >= lines_to_dump) {
-          dump();
-        }
+        // Dump directly to file
+        item.value().dump(file_);
+        file_ << "\n";
       } else {
-        if (buffered_lines >= 0) {
-          dump();
-        }
         // No data available, sleep for the specified duration
-        if (need_flash) {
-          // Flush periodically for better error recovery
-          flush_compressed();
-        }
+        file_.flush();
         std::this_thread::sleep_for(sleep_duration_);
       }
     }
@@ -252,32 +125,19 @@ private:
         break;
       }
 
-      // buffer.clear();
-      item.value().dump(buffer);
-      buffer << "\n";
-      buffered_lines += 1;
-
-      if (file_ != nullptr && cctx_ != nullptr && buffered_lines >= lines_to_dump) {
-        dump();
-      }
+      item.value().dump(file_);
+      file_ << "\n";
     }
 
-    if (file_ != nullptr && cctx_ != nullptr && buffered_lines >= lines_to_dump) {
-      dump();
-    }
-    // Finish compression
-    if (file_ != nullptr && cctx_ != nullptr) {
-      finish_compressed();
-    }
+    // Final flush
+    file_.flush();
+    std::cerr << "queue max size " << max_size << std::endl;
   }
 
   std::string filename_;
   std::chrono::milliseconds sleep_duration_;
   LockFreeQueue<T> queue_;
-  std::FILE *file_;
-  ZSTD_CCtx *cctx_;
-  std::vector<char> compression_buffer_;
-  size_t compression_buffer_size_;
+  std::ofstream file_;
   std::jthread dumper_thread_;
   std::atomic<bool> stopped_{false};
 };
