@@ -237,3 +237,94 @@ TEST_CASE("LockFreeQueue - Destructor", "[lockfree][destructor]") {
         REQUIRE(true);
     }
 }
+
+TEST_CASE("LockFreeQueue - Size", "[lockfree][size]") {
+    LockFreeQueue<int> queue;
+
+    SECTION("Empty queue has size 0") {
+        REQUIRE(queue.size() == 0);
+    }
+
+    SECTION("Size increases with push") {
+        REQUIRE(queue.size() == 0);
+        queue.push(1);
+        REQUIRE(queue.size() == 1);
+        queue.push(2);
+        REQUIRE(queue.size() == 2);
+        queue.push(3);
+        REQUIRE(queue.size() == 3);
+    }
+
+    SECTION("Size decreases with try_pop") {
+        queue.push(1);
+        queue.push(2);
+        queue.push(3);
+        REQUIRE(queue.size() == 3);
+
+        queue.try_pop();
+        REQUIRE(queue.size() == 2);
+
+        queue.try_pop();
+        REQUIRE(queue.size() == 1);
+
+        queue.try_pop();
+        REQUIRE(queue.size() == 0);
+    }
+
+    SECTION("Size with mixed operations") {
+        queue.push(1);
+        queue.push(2);
+        REQUIRE(queue.size() == 2);
+
+        queue.try_pop();
+        REQUIRE(queue.size() == 1);
+
+        queue.push(3);
+        queue.push(4);
+        REQUIRE(queue.size() == 3);
+
+        queue.try_pop();
+        queue.try_pop();
+        REQUIRE(queue.size() == 1);
+    }
+
+    SECTION("Size with concurrent operations") {
+        const int num_threads = 4;
+        const int items_per_thread = 100;
+
+        std::vector<std::thread> producers;
+        for (int t = 0; t < num_threads; ++t) {
+            producers.emplace_back([&queue, items_per_thread, t]() {
+                for (int i = 0; i < items_per_thread; ++i) {
+                    queue.push(t * items_per_thread + i);
+                }
+            });
+        }
+
+        for (auto& thread : producers) {
+            thread.join();
+        }
+
+        // Size should be approximately num_threads * items_per_thread
+        // Allow some tolerance due to concurrent operations
+        size_t final_size = queue.size();
+        REQUIRE(final_size == num_threads * items_per_thread);
+
+        // Consume all items
+        int consumed = 0;
+        while (queue.try_pop().has_value()) {
+            consumed++;
+        }
+
+        REQUIRE(consumed == num_threads * items_per_thread);
+        REQUIRE(queue.size() == 0);
+    }
+
+    SECTION("Try_pop on empty queue doesn't affect size") {
+        REQUIRE(queue.size() == 0);
+        auto result = queue.try_pop();
+        REQUIRE_FALSE(result.has_value());
+        REQUIRE(queue.size() == 0);
+    }
+}
+

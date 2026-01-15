@@ -32,6 +32,13 @@ public:
    */
   T pop();
 
+  /**
+   * Get approximate size of the queue.
+   * The returned value may not be exact due to concurrent operations.
+   * Returns the approximate number of items in the queue.
+   */
+  size_t size() const;
+
 private:
   struct Node {
     T data;
@@ -42,11 +49,12 @@ private:
 
   std::atomic<Node*> head_;
   std::atomic<Node*> tail_;
+  std::atomic<size_t> size_;
 };
 
 template <typename T>
 LockFreeQueue<T>::LockFreeQueue() 
-    : head_(nullptr), tail_(nullptr) {
+    : head_(nullptr), tail_(nullptr), size_(0) {
   Node* dummy = new Node(T());
   head_.store(dummy, std::memory_order_relaxed);
   tail_.store(dummy, std::memory_order_relaxed);
@@ -82,6 +90,8 @@ void LockFreeQueue<T>::push(T item) {
           std::atomic_compare_exchange_strong_explicit(
               &tail_, &last, new_node,
               std::memory_order_release, std::memory_order_relaxed);
+          // Increment size counter
+          size_.fetch_add(1, std::memory_order_relaxed);
           return;
         }
       } else {
@@ -120,6 +130,8 @@ std::optional<T> LockFreeQueue<T>::try_pop() {
             std::memory_order_release, std::memory_order_relaxed)) {
           // Successfully dequeued, delete old dummy node
           delete first;
+          // Decrement size counter
+          size_.fetch_sub(1, std::memory_order_relaxed);
           return data;
         }
         // CAS failed, retry
@@ -137,6 +149,11 @@ T LockFreeQueue<T>::pop() {
     }
     // Queue is empty, busy wait
   }
+}
+
+template <typename T>
+size_t LockFreeQueue<T>::size() const {
+  return size_.load(std::memory_order_relaxed);
 }
 
 }

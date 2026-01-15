@@ -432,7 +432,8 @@ public:
   static void on_event_start_v4(void *context, void **eHandle,
                                 ncclProfilerEventDescr_v4_t *eDescr) {
     auto &sh_ctx = *static_cast<std::shared_ptr<CommContext> *>(context);
-    auto hdl = sh_ctx->pool_.create();
+    auto hdl = sh_ctx->pool_.create(
+      sh_ctx->self_.lock());
     hdl->set_parent(eDescr->parentObj);
     *eHandle = hdl;
 
@@ -667,9 +668,7 @@ private:
 
       auto mask = std::getenv("NCCL_TRACER_ACTIVATE_MASK");
       if (mask == nullptr) {
-        activate_mask_ = ncclProfileGroup | ncclProfileColl | ncclProfileP2p |
-                         ncclProfileKernelCh | ncclProfileProxyOp |
-                         ncclProfileProxyStep | ncclProfileProxyCtrl;
+        activate_mask_ = ncclProfileP2p | ncclProfileColl | ncclProfileProxyStep;
       } else {
         activate_mask_ = atoi(mask);
       }
