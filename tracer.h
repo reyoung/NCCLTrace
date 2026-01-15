@@ -328,6 +328,7 @@ typedef ncclProfilerEventState_t ncclProfilerEventState_v4_t;
 inline std::string_view get_e_state_name(ncclProfilerEventState_v4_t state) {
   // Static storage for state name strings
   static constexpr const char* STATE_KERNEL_CH_STOP = "ncclProfilerKernelChStop";
+  static constexpr const char* STATE_PROXY_OP_IN_PROGRESS = "ncclProfilerProxyOpInProgress_v4";
   static constexpr const char* STATE_PROXY_STEP_SEND_GPU_WAIT = "ncclProfilerProxyStepSendGPUWait";
   static constexpr const char* STATE_PROXY_STEP_SEND_PEER_WAIT = "ncclProfilerProxyStepSendPeerWait_v4";
   static constexpr const char* STATE_PROXY_STEP_SEND_WAIT = "ncclProfilerProxyStepSendWait";
@@ -345,6 +346,8 @@ inline std::string_view get_e_state_name(ncclProfilerEventState_v4_t state) {
   switch (state) {
     case ncclProfilerKernelChStop:
       return STATE_KERNEL_CH_STOP;
+    case ncclProfilerProxyOpInProgress_v4:
+      return STATE_PROXY_OP_IN_PROGRESS;
     case ncclProfilerProxyStepSendGPUWait:
       return STATE_PROXY_STEP_SEND_GPU_WAIT;
     case ncclProfilerProxyStepSendPeerWait_v4:
@@ -498,6 +501,19 @@ public:
             *hdl->context_, 0,
             "kernel ch stop: channel_id=%u, start_timer=%lu, stop_timer=%lu",
             ctx.channel_id_, ctx.p_timer_, stop_p_timer);
+      }
+    } else if (eState == ncclProfilerProxyOpInProgress_v4) {
+      // Handle ProxyOp InProgress event
+      if (std::holds_alternative<ProfileProxyOpContext>(hdl->event_context_)) {
+        auto &ctx = std::get<ProfileProxyOpContext>(hdl->event_context_);
+        std::string_view state_name = get_e_state_name(eState);
+        hdl->report(ProfileProxyOpStateRecord{
+            .context_ = ctx,
+            .state_name_ = state_name,
+        });
+        CTX_LOG_TRACE(*hdl->context_, 0,
+                     "proxy op state: rank=%d, channel_id=%u, peer=%d, state=%s",
+                     ctx.rank_, ctx.channel_id_, ctx.peer_, state_name.data());
       }
     } else if (eState == ncclProfilerProxyStepSendGPUWait ||
                eState == ncclProfilerProxyStepSendPeerWait_v4 ||

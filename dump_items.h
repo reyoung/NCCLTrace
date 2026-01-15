@@ -105,6 +105,11 @@ struct ProfileProxyOpStop : BaseItem {
   ProfileProxyOpContext context_;
 };
 
+struct ProfileProxyOpStateRecord : BaseItem {
+  ProfileProxyOpContext context_;
+  std::string_view state_name_;  // State name as string
+};
+
 struct ProfileProxyStepContext {
   int rank_;
   int step_;
@@ -247,6 +252,11 @@ public:
     return *this;
   }
 
+  JsonBuilder &with_state_name() {
+    j_["state"] = item_.state_name_;
+    return *this;
+  }
+
   JsonBuilder &with_stop_p_timer() {
     j_["stop_p_timer"] = item_.stop_p_timer_;
     return *this;
@@ -342,6 +352,15 @@ template <> struct adl_serializer<nccltrace::ProfileProxyOpStop> {
   }
 };
 
+template <> struct adl_serializer<nccltrace::ProfileProxyOpStateRecord> {
+  static void to_json(json &j, const nccltrace::ProfileProxyOpStateRecord &record) {
+    j = JsonBuilder(record, "profile_proxy_op_state_record")
+            .with_proxy_op_context()
+            .with_state_name()
+            .build();
+  }
+};
+
 template <> struct adl_serializer<nccltrace::ProfileProxyStepStart> {
   static void to_json(json &j, const nccltrace::ProfileProxyStepStart &start) {
     j = JsonBuilder(start, "profile_proxy_step_start")
@@ -400,10 +419,10 @@ using TraceDumpItemVar =
                  ProfileCollStart, ProfileCollStop, ProfileP2pStart,
                  ProfileP2pStop, ProfileKernelChStart, ProfileKernelChStop,
                  ProfileProxyOpStart, ProfileProxyOpStop,
-                 ProfileProxyStepStart, ProfileProxyStepStop,
-                 ProfileProxyStepStateRecord, ProfileProxyCtrlStart,
-                 ProfileProxyCtrlStop, ProfileProxyCtrlStateRecord,
-                 std::monostate>;
+                 ProfileProxyOpStateRecord, ProfileProxyStepStart,
+                 ProfileProxyStepStop, ProfileProxyStepStateRecord,
+                 ProfileProxyCtrlStart, ProfileProxyCtrlStop,
+                 ProfileProxyCtrlStateRecord, std::monostate>;
 class TraceDumpItem {
 public:
   TraceDumpItemVar item_;
