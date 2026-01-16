@@ -6,6 +6,7 @@
 #include <chrono>
 #include <concepts>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <functional>
@@ -13,13 +14,12 @@
 #include <memory>
 #include <stdexcept>
 #include <stop_token>
-#include <thread>
-#include <cstdlib>
 #include <string>
 #include <string_view>
+#include <thread>
 
-#include <boost/iostreams/filtering_stream.hpp>
 #include <boost/iostreams/filter/gzip.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
 
 #if __has_include(<boost/iostreams/filter/bzip2.hpp>)
 #include <boost/iostreams/filter/bzip2.hpp>
@@ -128,18 +128,24 @@ private:
     static thread_local std::string tmp;
     tmp.assign(s.begin(), s.end());
     for (char &c : tmp) {
-      if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
+      if (c >= 'A' && c <= 'Z')
+        c = static_cast<char>(c - 'A' + 'a');
     }
     return std::string_view(tmp);
   }
 
   static DumpFormat parse_format(std::string_view v) {
     v = to_lower(v);
-    if (v == "" || v == "gzip" || v == "gz") return DumpFormat::Gzip;
-    if (v == "plain" || v == "none") return DumpFormat::Plain;
-    if (v == "bz2" || v == "bzip2") return DumpFormat::Bz2;
-    if (v == "lzma" || v == "xz") return DumpFormat::Lzma;
-    if (v == "zstd" || v == "zst") return DumpFormat::Zstd;
+    if (v == "" || v == "gzip" || v == "gz")
+      return DumpFormat::Gzip;
+    if (v == "plain" || v == "none")
+      return DumpFormat::Plain;
+    if (v == "bz2" || v == "bzip2")
+      return DumpFormat::Bz2;
+    if (v == "lzma" || v == "xz")
+      return DumpFormat::Lzma;
+    if (v == "zstd" || v == "zst")
+      return DumpFormat::Zstd;
     // unknown -> default
     return DumpFormat::Gzip;
   }
@@ -229,8 +235,19 @@ private:
   void dumper_thread_func(std::stop_token stoken) {
     using clock_t = std::chrono::steady_clock;
     auto last_dump = clock_t::now();
+    int64_t max_q_size = 0;
+    int64_t max_q_size_offset = 8; // 256 items
     while (!stoken.stop_requested()) {
       auto item = queue_.try_pop();
+      max_q_size = std::max(queue_.size(), max_q_size);
+      if (max_q_size > (1 << max_q_size_offset)) {
+        std::cerr << "[nccltrace] Warning: FileDumper queue size high: "
+                  << max_q_size << " items. "
+                  << "Consider increasing dumper thread priority or "
+                     "increasing sleep duration."
+                  << std::endl;
+        max_q_size_offset++;
+      }
       if (item.has_value()) {
         item.value().dump(out_);
         last_dump = clock_t::now();
