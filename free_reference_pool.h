@@ -8,6 +8,7 @@
 #include <random>
 #include <type_traits>
 #include <vector>
+#include "comm_desc.h"
 
 namespace nccltrace {
 
@@ -144,7 +145,7 @@ public:
    * @return Item* Pointer to a fresh/reused item with ref_count = 1
    * @throws std::runtime_error if internal error occurs (null item)
    */
-  Item *create() {
+  Item *create(std::shared_ptr<CommDesc> comm) {
     auto now = std::chrono::steady_clock::now();
 
     // Lambda to check if an item is reusable
@@ -177,6 +178,7 @@ public:
     // No free slot found, grow the pool (double the size)
     size_t old_size = items_.size();
     size_t new_size = old_size == 0 ? 1 : old_size * 2;
+    LOG_INFO(comm, 0, "resize comm buffer to size %lld", new_size);
     items_.resize(new_size);
     for (size_t i = old_size; i < new_size; ++i) {
       items_[i] = std::make_unique<Item>();

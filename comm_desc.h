@@ -1,7 +1,6 @@
 #pragma once
 #include <mutex>
 #include <nlohmann/json.hpp>
-#include <stdarg.h>
 #include <stdint.h>
 #include <string>
 namespace nccltrace {

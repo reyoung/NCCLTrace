@@ -422,18 +422,26 @@ using TraceDumpItemVar =
                  ProfileProxyOpStateRecord, ProfileProxyStepStart,
                  ProfileProxyStepStop, ProfileProxyStepStateRecord,
                  ProfileProxyCtrlStart, ProfileProxyCtrlStop,
-                 ProfileProxyCtrlStateRecord, std::monostate>;
+                 ProfileProxyCtrlStateRecord>;
 class TraceDumpItem {
 public:
   TraceDumpItemVar item_;
   TraceDumpItem(TraceDumpItemVar var) : item_(std::move(var)) {}
   TraceDumpItem() = default;
 
+  std::shared_ptr<CommDesc> desc() const {
+    return std::visit(
+        [](const auto &arg) -> std::shared_ptr<CommDesc> {
+          return arg.comm_;
+        },
+        item_);
+  }
+
   void dump(std::ostream &out) const {
     std::visit(
         [&out](const auto &arg) {
           nlohmann::json j = arg;
-          out << j;
+          nlohmann::json::to_msgpack(j, out);
         },
         item_);
   }
