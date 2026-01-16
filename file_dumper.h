@@ -14,6 +14,11 @@
 #include <stdexcept>
 #include <stop_token>
 #include <thread>
+#include <cstdlib>
+#include <string_view>
+
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/filter/gzip.hpp>
 
 namespace nccltrace {
 
@@ -29,12 +34,21 @@ public:
   explicit FileDumper(
       const std::string &filename,
       std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(2))
-      : filename_(filename), sleep_duration_(sleep_duration) {
-    // Open file for writing
-    file_.open(filename_, std::ios::out);
+      : sleep_duration_(sleep_duration) {
+    const bool gzip_enabled = should_enable_gzip();
+    filename_ = make_output_filename(filename, gzip_enabled);
+
+    // Open file for writing (binary: msgpack bytes)
+    file_.open(filename_, std::ios::out | std::ios::binary);
     if (!file_.is_open()) {
       throw std::runtime_error("Failed to open file: " + filename_);
     }
+
+    // Setup output stream (optionally gzip)
+    if (gzip_enabled) {
+      out_.push(boost::iostreams::gzip_compressor());
+    }
+    out_.push(file_);
 
     // Start the dumper thread
     dumper_thread_ =
@@ -52,7 +66,7 @@ public:
   FileDumper(FileDumper &&other) noexcept
       : filename_(std::move(other.filename_)),
         sleep_duration_(other.sleep_duration_), queue_(std::move(other.queue_)),
-        file_(std::move(other.file_)),
+        file_(std::move(other.file_)), out_(std::move(other.out_)),
         dumper_thread_(std::move(other.dumper_thread_)),
         stopped_(other.stopped_.load()) {
     other.stopped_ = true;
@@ -66,6 +80,7 @@ public:
       sleep_duration_ = other.sleep_duration_;
       queue_ = std::move(other.queue_);
       file_ = std::move(other.file_);
+      out_ = std::move(other.out_);
       dumper_thread_ = std::move(other.dumper_thread_);
       stopped_ = other.stopped_.load();
 
@@ -91,6 +106,14 @@ public:
         dumper_thread_.join();
       }
 
+      // Finalize gzip stream (needs reset before closing underlying file)
+      try {
+        out_.flush();
+        out_.reset();
+      } catch (...) {
+        // best-effort shutdown
+      }
+
       // Close file
       if (file_.is_open()) {
         file_.close();
@@ -98,18 +121,35 @@ public:
     }
   }
 
+  const std::string &filename() const { return filename_; }
+
 private:
+  static bool should_enable_gzip() {
+    const char *v = std::getenv("NCCL_TRACER_DUMP_GZIP");
+    // default: enabled
+    if (!v || *v == '\0') {
+      return true;
+    }
+    // "1" enables; "0" disables; anything else treated as enabled
+    return !(std::string_view(v) == "0");
+  }
+
+  static std::string make_output_filename(const std::string &base,
+                                          bool gzip_enabled) {
+    return gzip_enabled ? (base + ".msgpack.gz") : (base + ".msgpack");
+  }
+
   // Background thread function
   void dumper_thread_func(std::stop_token stoken) {
     while (!stoken.stop_requested()) {
       // Try to pop an item from the queue
       auto item = queue_.try_pop();
       if (item.has_value()) {
-        // Dump directly to file
-        item.value().dump(file_);
+        // Dump to output stream (file or gzip-wrapped)
+        item.value().dump(out_);
       } else {
-        // No data available, sleep for the specified duration
-        file_.flush();
+        // No data available
+        out_.flush();
         std::this_thread::yield();
       }
     }
@@ -120,17 +160,18 @@ private:
       if (!item.has_value()) {
         break;
       }
-      item.value().dump(file_);
+      item.value().dump(out_);
     }
 
     // Final flush
-    file_.flush();
+    out_.flush();
   }
 
   std::string filename_;
   std::chrono::milliseconds sleep_duration_;
   LockFreeQueue<T> queue_;
   std::ofstream file_;
+  boost::iostreams::filtering_ostream out_;
   std::jthread dumper_thread_;
   std::atomic<bool> stopped_{false};
 };

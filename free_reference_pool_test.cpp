@@ -3,6 +3,7 @@
 #include <vector>
 #include <map>
 #include <chrono>
+#include <memory>
 #include "free_reference_pool.h"
 
 using namespace nccltrace;
@@ -28,16 +29,16 @@ TEST_CASE("FreeRefPool - Basic creation and reference counting", "[FreeRefPool]"
     FreeRefPool<TestData> pool(reset_test_data, 100ms);
 
     SECTION("Create item has ref_count 1") {
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         REQUIRE(item != nullptr);
         REQUIRE(item->ref_count_.load() == 1);
         REQUIRE(item->initialized == true);
     }
 
     SECTION("Multiple creates return different items initially") {
-        auto* item1 = pool.create();
-        auto* item2 = pool.create();
-        auto* item3 = pool.create();
+        auto* item1 = pool.create(null_comm());
+        auto* item2 = pool.create(null_comm());
+        auto* item3 = pool.create(null_comm());
 
         REQUIRE(item1 != nullptr);
         REQUIRE(item2 != nullptr);
@@ -52,7 +53,7 @@ TEST_CASE("FreeRefPool - Reference counting operations", "[FreeRefPool]") {
     FreeRefPool<TestData> pool(reset_test_data, 100ms);
 
     SECTION("ref() increments count") {
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         REQUIRE(item->ref_count_.load() == 1);
 
         item->ref();
@@ -63,7 +64,7 @@ TEST_CASE("FreeRefPool - Reference counting operations", "[FreeRefPool]") {
     }
 
     SECTION("deref() decrements count") {
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         item->ref();
         item->ref();
         REQUIRE(item->ref_count_.load() == 3);
@@ -76,7 +77,7 @@ TEST_CASE("FreeRefPool - Reference counting operations", "[FreeRefPool]") {
     }
 
     SECTION("deref() to 0 records release time") {
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         REQUIRE(item->ref_count_.load() == 1);
 
         auto before = std::chrono::steady_clock::now();
@@ -93,7 +94,7 @@ TEST_CASE("FreeRefPool - Item reuse with delay", "[FreeRefPool]") {
     FreeRefPool<TestData> pool(reset_test_data, 100ms);
 
     SECTION("Item is reused after min_reuse_interval") {
-        auto* item1 = pool.create();
+        auto* item1 = pool.create(null_comm());
         item1->value = 42;
         item1->name = "test";
         auto* addr1 = item1;
@@ -106,7 +107,7 @@ TEST_CASE("FreeRefPool - Item reuse with delay", "[FreeRefPool]") {
         std::this_thread::sleep_for(150ms);
 
         // Create again should reuse the same item
-        auto* item2 = pool.create();
+        auto* item2 = pool.create(null_comm());
         REQUIRE(item2 == addr1);
         REQUIRE(item2->ref_count_.load() == 1);
         // Reset function should have been called
@@ -116,7 +117,7 @@ TEST_CASE("FreeRefPool - Item reuse with delay", "[FreeRefPool]") {
     }
 
     SECTION("Item is NOT reused before min_reuse_interval") {
-        auto* item1 = pool.create();
+        auto* item1 = pool.create(null_comm());
         auto* addr1 = item1;
 
         // Release the item
@@ -124,7 +125,7 @@ TEST_CASE("FreeRefPool - Item reuse with delay", "[FreeRefPool]") {
 
         // Immediately try to create (before interval)
         std::this_thread::sleep_for(10ms); // Small delay but less than 100ms
-        auto* item2 = pool.create();
+        auto* item2 = pool.create(null_comm());
 
         // Should get a different item
         REQUIRE(item2 != addr1);
@@ -135,11 +136,11 @@ TEST_CASE("FreeRefPool - Pool growth", "[FreeRefPool]") {
     FreeRefPool<TestData> pool(reset_test_data, 100ms);
 
     SECTION("Pool grows when no free slots available") {
-        std::vector<decltype(pool.create())> items;
+        std::vector<TestData*> items;
 
         // Create multiple items without releasing
         for (int i = 0; i < 10; ++i) {
-            auto* item = pool.create();
+            auto* item = pool.create(null_comm());
             REQUIRE(item != nullptr);
             items.push_back(item);
         }
@@ -167,7 +168,7 @@ TEST_CASE("FreeRefPool - Reset function is called", "[FreeRefPool]") {
 
     SECTION("Reset called on first create") {
         reset_call_count = 0;
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
 
         REQUIRE(reset_call_count == 1);
         REQUIRE(item->value == 999);
@@ -177,7 +178,7 @@ TEST_CASE("FreeRefPool - Reset function is called", "[FreeRefPool]") {
     SECTION("Reset called on reuse") {
         reset_call_count = 0;
 
-        auto* item1 = pool.create();
+        auto* item1 = pool.create(null_comm());
         REQUIRE(reset_call_count == 1);
 
         item1->value = 42;
@@ -186,7 +187,7 @@ TEST_CASE("FreeRefPool - Reset function is called", "[FreeRefPool]") {
 
         std::this_thread::sleep_for(150ms);
 
-        auto* item2 = pool.create();
+        auto* item2 = pool.create(null_comm());
         REQUIRE(reset_call_count == 2);
         REQUIRE(item2->value == 999);
         REQUIRE(item2->name == "reset");
@@ -201,12 +202,12 @@ TEST_CASE("FreeRefPool - Thread safety", "[FreeRefPool][multithread]") {
         constexpr int items_per_thread = 100;
 
         std::vector<std::thread> threads;
-        std::vector<std::vector<decltype(pool.create())>> all_items(num_threads);
+        std::vector<std::vector<TestData*>> all_items(num_threads);
 
         for (int t = 0; t < num_threads; ++t) {
             threads.emplace_back([&pool, &all_items, t]() {
                 for (int i = 0; i < items_per_thread; ++i) {
-                    auto* item = pool.create();
+                    auto* item = pool.create(null_comm());
                     REQUIRE(item != nullptr);
                     REQUIRE(item->ref_count_.load() >= 1);
                     all_items[t].push_back(item);
@@ -233,7 +234,7 @@ TEST_CASE("FreeRefPool - Multiple references", "[FreeRefPool]") {
     FreeRefPool<TestData> pool(reset_test_data, 100ms);
 
     SECTION("Item with multiple refs is not reused") {
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         item->ref(); // Add extra reference
         item->ref(); // Add another reference
 
@@ -247,7 +248,7 @@ TEST_CASE("FreeRefPool - Multiple references", "[FreeRefPool]") {
         std::this_thread::sleep_for(150ms);
 
         // Should not be reused yet (still has 1 reference)
-        auto* item2 = pool.create();
+        auto* item2 = pool.create(null_comm());
         REQUIRE(item2 != item);
 
         // Now release the last reference
@@ -257,7 +258,7 @@ TEST_CASE("FreeRefPool - Multiple references", "[FreeRefPool]") {
         std::this_thread::sleep_for(150ms);
 
         // Now it should be reusable
-        auto* item3 = pool.create();
+        auto* item3 = pool.create(null_comm());
         // item3 might be item or item2 depending on search order
         // Just verify it's valid
         REQUIRE(item3 != nullptr);
@@ -280,7 +281,7 @@ TEST_CASE("FreeRefPool - Custom types", "[FreeRefPool]") {
     FreeRefPool<ComplexData> pool(reset_complex, 50ms);
 
     SECTION("Complex types work correctly") {
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         REQUIRE(item != nullptr);
         REQUIRE(item->numbers.empty());
         REQUIRE(item->data_map.empty());
@@ -293,7 +294,7 @@ TEST_CASE("FreeRefPool - Custom types", "[FreeRefPool]") {
         item->deref();
         std::this_thread::sleep_for(100ms);
 
-        auto* item2 = pool.create();
+        auto* item2 = pool.create(null_comm());
         REQUIRE(item2 == item);
         REQUIRE(item2->numbers.empty());
         REQUIRE(item2->data_map.empty());
@@ -306,11 +307,11 @@ TEST_CASE("FreeRefPool - Stress test", "[FreeRefPool][stress]") {
 
     SECTION("Many creates and releases") {
         for (int round = 0; round < 5; ++round) {
-            std::vector<decltype(pool.create())> items;
+            std::vector<TestData*> items;
 
             // Create many items
             for (int i = 0; i < 50; ++i) {
-                auto* item = pool.create();
+                auto* item = pool.create(null_comm());
                 REQUIRE(item != nullptr);
                 item->value = i;
                 items.push_back(item);
@@ -325,7 +326,7 @@ TEST_CASE("FreeRefPool - Stress test", "[FreeRefPool][stress]") {
 
             // Create more (should reuse released ones)
             for (int i = 0; i < 25; ++i) {
-                auto* item = pool.create();
+                auto* item = pool.create(null_comm());
                 REQUIRE(item != nullptr);
             }
 
@@ -365,7 +366,7 @@ TEST_CASE("FreeRefPool - CRTP on_obj_free callback", "[FreeRefPool][crtp]") {
     SECTION("on_obj_free is called when ref_count drops to 0") {
         int free_count = 0;
 
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         item->value = 42;
         item->free_counter = &free_count;
 
@@ -382,7 +383,7 @@ TEST_CASE("FreeRefPool - CRTP on_obj_free callback", "[FreeRefPool][crtp]") {
     SECTION("on_obj_free is called each time ref_count drops to 0") {
         int free_count = 0;
 
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         item->free_counter = &free_count;
 
         // First drop to 0
@@ -392,7 +393,7 @@ TEST_CASE("FreeRefPool - CRTP on_obj_free callback", "[FreeRefPool][crtp]") {
         std::this_thread::sleep_for(100ms);
 
         // Reuse the item
-        auto* item2 = pool.create();
+        auto* item2 = pool.create(null_comm());
         REQUIRE(item2 == item); // Should be the same item
         item2->free_counter = &free_count;
 
@@ -404,7 +405,7 @@ TEST_CASE("FreeRefPool - CRTP on_obj_free callback", "[FreeRefPool][crtp]") {
     SECTION("on_obj_free is not called for intermediate deref") {
         int free_count = 0;
 
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         item->free_counter = &free_count;
         item->ref(); // ref_count = 2
         item->ref(); // ref_count = 3
@@ -427,7 +428,7 @@ TEST_CASE("FreeRefPool - CRTP on_obj_free callback", "[FreeRefPool][crtp]") {
         // TestData doesn't have on_obj_free, should compile and work fine
         FreeRefPool<TestData> simple_pool(reset_test_data, 50ms);
 
-        auto* item = simple_pool.create();
+        auto* item = simple_pool.create(null_comm());
         REQUIRE(item != nullptr);
         item->value = 123;
 
@@ -461,7 +462,7 @@ TEST_CASE("FreeRefPool - CRTP on_obj_required_again callback", "[FreeRefPool][cr
     SECTION("on_obj_required_again is NOT called during initial create") {
         int require_count = 0;
 
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         item->require_counter = &require_count;
 
         // Should NOT be called during create (ref_count goes from 0 to 1 via fetch_add)
@@ -472,7 +473,7 @@ TEST_CASE("FreeRefPool - CRTP on_obj_required_again callback", "[FreeRefPool][cr
     SECTION("on_obj_required_again is called when ref() from 0") {
         int require_count = 0;
 
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         item->require_counter = &require_count;
 
         // Release to 0
@@ -489,7 +490,7 @@ TEST_CASE("FreeRefPool - CRTP on_obj_required_again callback", "[FreeRefPool][cr
     SECTION("on_obj_required_again is NOT called for non-zero ref()") {
         int require_count = 0;
 
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         item->require_counter = &require_count;
 
         REQUIRE(item->ref_count_.load() == 1);
@@ -509,7 +510,7 @@ TEST_CASE("FreeRefPool - CRTP on_obj_required_again callback", "[FreeRefPool][cr
     SECTION("on_obj_required_again is called multiple times") {
         int require_count = 0;
 
-        auto* item = pool.create();
+        auto* item = pool.create(null_comm());
         item->require_counter = &require_count;
 
         // First cycle: deref to 0, then ref
@@ -552,7 +553,7 @@ TEST_CASE("FreeRefPool - CRTP on_obj_required_again callback", "[FreeRefPool][cr
         int require_count = 0;
         int free_count = 0;
 
-        auto* item = both_pool.create();
+        auto* item = both_pool.create(null_comm());
         item->require_counter = &require_count;
         item->free_counter = &free_count;
 
