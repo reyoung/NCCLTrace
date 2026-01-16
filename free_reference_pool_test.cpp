@@ -9,6 +9,10 @@
 using namespace nccltrace;
 using namespace std::chrono_literals;
 
+namespace {
+inline std::shared_ptr<CommDesc> null_comm() { return {}; }
+}
+
 // Test struct for pooling
 struct TestData {
     int value;

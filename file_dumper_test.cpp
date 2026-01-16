@@ -83,12 +83,15 @@ void cleanup_test_file(const std::string& filename) {
 void cleanup_both_outputs(const std::string& base) {
     cleanup_test_file(base + ".msgpack");
     cleanup_test_file(base + ".msgpack.gz");
+    cleanup_test_file(base + ".msgpack.bz2");
+    cleanup_test_file(base + ".msgpack.xz");
+    cleanup_test_file(base + ".msgpack.zst");
 }
 }
 
 TEST_CASE("FileDumper - Basic functionality", "[file_dumper]") {
-    ScopedEnvVar gzip_env("NCCL_TRACER_DUMP_GZIP");
-    gzip_env.set("0"); // disable gzip for these text-content tests
+    ScopedEnvVar fmt_env("NCCL_TRACER_DUMP_FORMAT");
+    fmt_env.set("plain"); // plaintext dump for these text-content tests
 
     const std::string test_base = "test_dumper_basic";
     const std::string test_file = test_base + ".msgpack";
@@ -138,8 +141,8 @@ TEST_CASE("FileDumper - Basic functionality", "[file_dumper]") {
 }
 
 TEST_CASE("FileDumper - Concurrent pushes", "[file_dumper]") {
-    ScopedEnvVar gzip_env("NCCL_TRACER_DUMP_GZIP");
-    gzip_env.set("0");
+    ScopedEnvVar fmt_env("NCCL_TRACER_DUMP_FORMAT");
+    fmt_env.set("plain");
 
     const std::string test_base = "test_dumper_concurrent";
     const std::string test_file = test_base + ".msgpack";
@@ -182,8 +185,8 @@ TEST_CASE("FileDumper - Concurrent pushes", "[file_dumper]") {
 }
 
 TEST_CASE("FileDumper - Different DumpItem types", "[file_dumper]") {
-    ScopedEnvVar gzip_env("NCCL_TRACER_DUMP_GZIP");
-    gzip_env.set("0");
+    ScopedEnvVar fmt_env("NCCL_TRACER_DUMP_FORMAT");
+    fmt_env.set("plain");
 
     const std::string test_base = "test_dumper_types";
     const std::string test_file = test_base + ".msgpack";
@@ -210,8 +213,8 @@ TEST_CASE("FileDumper - Different DumpItem types", "[file_dumper]") {
 }
 
 TEST_CASE("FileDumper - Stop functionality", "[file_dumper]") {
-    ScopedEnvVar gzip_env("NCCL_TRACER_DUMP_GZIP");
-    gzip_env.set("0");
+    ScopedEnvVar fmt_env("NCCL_TRACER_DUMP_FORMAT");
+    fmt_env.set("plain");
 
     const std::string test_base = "test_dumper_stop";
     const std::string test_file = test_base + ".msgpack";
@@ -248,8 +251,8 @@ TEST_CASE("FileDumper - Stop functionality", "[file_dumper]") {
 }
 
 TEST_CASE("FileDumper - Sleep duration", "[file_dumper]") {
-    ScopedEnvVar gzip_env("NCCL_TRACER_DUMP_GZIP");
-    gzip_env.set("0");
+    ScopedEnvVar fmt_env("NCCL_TRACER_DUMP_FORMAT");
+    fmt_env.set("plain");
 
     const std::string test_base = "test_dumper_sleep";
     const std::string test_file = test_base + ".msgpack";
@@ -270,8 +273,8 @@ TEST_CASE("FileDumper - Sleep duration", "[file_dumper]") {
 }
 
 TEST_CASE("FileDumper - File append mode", "[file_dumper]") {
-    ScopedEnvVar gzip_env("NCCL_TRACER_DUMP_GZIP");
-    gzip_env.set("0");
+    ScopedEnvVar fmt_env("NCCL_TRACER_DUMP_FORMAT");
+    fmt_env.set("plain");
 
     const std::string test_base = "test_dumper_append";
     const std::string test_file = test_base + ".msgpack";
@@ -298,13 +301,13 @@ TEST_CASE("FileDumper - File append mode", "[file_dumper]") {
     cleanup_both_outputs(test_base);
 }
 
-TEST_CASE("FileDumper - gzip toggle + filename suffix", "[file_dumper]") {
-    const std::string test_base = "test_dumper_gzip_toggle";
+TEST_CASE("FileDumper - format toggle + filename suffix", "[file_dumper]") {
+    const std::string test_base = "test_dumper_format_toggle";
     cleanup_both_outputs(test_base);
 
-    SECTION("Default is gzip enabled, suffix .msgpack.gz and gzip header") {
-        ScopedEnvVar gzip_env("NCCL_TRACER_DUMP_GZIP");
-        gzip_env.unset();
+    SECTION("Default is gzip (NCCL_TRACER_DUMP_FORMAT unset), suffix .msgpack.gz and gzip header") {
+        ScopedEnvVar fmt_env("NCCL_TRACER_DUMP_FORMAT");
+        fmt_env.unset();
 
         {
             FileDumper<TestItem> dumper(test_base);
@@ -322,9 +325,9 @@ TEST_CASE("FileDumper - gzip toggle + filename suffix", "[file_dumper]") {
         REQUIRE(static_cast<unsigned char>(bytes[1]) == 0x8b);
     }
 
-    SECTION("When NCCL_TRACER_DUMP_GZIP=0, suffix .msgpack and plaintext dump") {
-        ScopedEnvVar gzip_env("NCCL_TRACER_DUMP_GZIP");
-        gzip_env.set("0");
+    SECTION("When NCCL_TRACER_DUMP_FORMAT=plain, suffix .msgpack and plaintext dump") {
+        ScopedEnvVar fmt_env("NCCL_TRACER_DUMP_FORMAT");
+        fmt_env.set("plain");
 
         {
             FileDumper<TestItem> dumper(test_base);
@@ -337,6 +340,25 @@ TEST_CASE("FileDumper - gzip toggle + filename suffix", "[file_dumper]") {
 
         auto content = read_file_content(test_base + ".msgpack");
         REQUIRE(content.find("Item 2: World") != std::string::npos);
+    }
+
+    SECTION("Deprecated NCCL_TRACER_DUMP_GZIP=0 still forces plain when format unset") {
+        ScopedEnvVar fmt_env("NCCL_TRACER_DUMP_FORMAT");
+        fmt_env.unset();
+        ScopedEnvVar gzip_env("NCCL_TRACER_DUMP_GZIP");
+        gzip_env.set("0");
+
+        {
+            FileDumper<TestItem> dumper(test_base);
+            dumper.push(TestItem(3, "Legacy"));
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+
+        REQUIRE(std::filesystem::exists(test_base + ".msgpack"));
+        REQUIRE_FALSE(std::filesystem::exists(test_base + ".msgpack.gz"));
+
+        auto content = read_file_content(test_base + ".msgpack");
+        REQUIRE(content.find("Item 3: Legacy") != std::string::npos);
     }
 
     cleanup_both_outputs(test_base);
