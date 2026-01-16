@@ -441,7 +441,7 @@ public:
     std::visit(
         [&out](const auto &arg) {
           nlohmann::json j = arg;
-          out << j;
+          nlohmann::json::to_msgpack(j, out);
         },
         item_);
   }

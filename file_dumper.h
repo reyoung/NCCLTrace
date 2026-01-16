@@ -28,7 +28,7 @@ public:
   // Constructor with filename and sleep duration (default 100ms)
   explicit FileDumper(
       const std::string &filename,
-      std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(100))
+      std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(2))
       : filename_(filename), sleep_duration_(sleep_duration) {
     // Open file for writing
     file_.open(filename_, std::ios::out);
@@ -101,20 +101,16 @@ public:
 private:
   // Background thread function
   void dumper_thread_func(std::stop_token stoken) {
-    size_t max_size = 0;
     while (!stoken.stop_requested()) {
       // Try to pop an item from the queue
       auto item = queue_.try_pop();
-      max_size = std::max(max_size, queue_.size());
-
       if (item.has_value()) {
         // Dump directly to file
         item.value().dump(file_);
-        file_ << "\n";
       } else {
         // No data available, sleep for the specified duration
         file_.flush();
-        std::this_thread::sleep_for(sleep_duration_);
+        std::this_thread::yield();
       }
     }
 
@@ -124,14 +120,11 @@ private:
       if (!item.has_value()) {
         break;
       }
-
       item.value().dump(file_);
-      file_ << "\n";
     }
 
     // Final flush
     file_.flush();
-    std::cerr << "queue max size " << max_size << std::endl;
   }
 
   std::string filename_;

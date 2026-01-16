@@ -686,8 +686,7 @@ private:
 
       auto mask = std::getenv("NCCL_TRACER_ACTIVATE_MASK");
       if (mask == nullptr) {
-        activate_mask_ =
-            ncclProfileP2p | ncclProfileColl | ncclProfileProxyStep;
+        activate_mask_ = ncclProfileP2p | ncclProfileColl;
       } else {
         activate_mask_ = atoi(mask);
       }

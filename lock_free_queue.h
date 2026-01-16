@@ -37,7 +37,7 @@ public:
    * The returned value may not be exact due to concurrent operations.
    * Returns the approximate number of items in the queue.
    */
-  size_t size() const;
+  int64_t size() const;
 
 private:
   struct Node {
@@ -49,7 +49,7 @@ private:
 
   std::atomic<Node*> head_;
   std::atomic<Node*> tail_;
-  std::atomic<size_t> size_;
+  std::atomic<int64_t> size_;
 };
 
 template <typename T>
@@ -152,7 +152,7 @@ T LockFreeQueue<T>::pop() {
 }
 
 template <typename T>
-size_t LockFreeQueue<T>::size() const {
+int64_t LockFreeQueue<T>::size() const {
   return size_.load(std::memory_order_relaxed);
 }
 
