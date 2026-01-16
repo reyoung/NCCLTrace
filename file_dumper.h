@@ -57,8 +57,8 @@ public:
       const std::string &filename,
       std::chrono::milliseconds sleep_duration = std::chrono::milliseconds(2))
       : sleep_duration_(sleep_duration) {
-    const auto format = resolve_format();
-    filename_ = make_output_filename(filename, format);
+    format_ = resolve_format();
+    filename_ = make_output_filename(filename, format_);
 
     // Open file for writing (binary: msgpack bytes)
     file_.open(filename_, std::ios::out | std::ios::binary);
@@ -67,7 +67,7 @@ public:
     }
 
     // Setup output stream filter chain
-    setup_output_filters(format);
+    setup_output_filters(format_);
     out_.push(file_);
 
     dumper_thread_ =
@@ -219,17 +219,34 @@ private:
     }
   }
 
+  void flush_to_disk_best_effort() {
+    out_.reset();
+    setup_output_filters(format_);
+    out_.push(file_);
+    file_.flush();
+  }
+
   void dumper_thread_func(std::stop_token stoken) {
+    using clock_t = std::chrono::steady_clock;
+    auto last_dump = clock_t::now();
     while (!stoken.stop_requested()) {
       auto item = queue_.try_pop();
       if (item.has_value()) {
         item.value().dump(out_);
+        last_dump = clock_t::now();
       } else {
-        out_.flush();
+        // Best-effort make output visible when idle too long
+        if (clock_t::now() - last_dump > std::chrono::seconds(30)) {
+          flush_to_disk_best_effort();
+          last_dump = clock_t::now();
+          // avoid repeated flushes
+          last_dump += std::chrono::days(1);
+        }
         std::this_thread::yield();
       }
     }
 
+    // Drain remaining items
     while (true) {
       auto item = queue_.try_pop();
       if (!item.has_value()) {
@@ -237,8 +254,6 @@ private:
       }
       item.value().dump(out_);
     }
-
-    out_.flush();
   }
 
   std::string filename_;
@@ -248,6 +263,8 @@ private:
   boost::iostreams::filtering_ostream out_;
   std::jthread dumper_thread_;
   std::atomic<bool> stopped_{false};
+
+  DumpFormat format_{DumpFormat::Gzip};
 };
 
 } // namespace nccltrace
